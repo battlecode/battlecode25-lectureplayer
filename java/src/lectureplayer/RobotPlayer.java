@@ -206,7 +206,6 @@ public class RobotPlayer {
     public static void runSoldier(RobotController rc) throws GameActionException{
         if (robotRole == 0) {
             robotRole = rc.getID() % 2 + 1;
-            System.out.println("NEW ROLE: " + robotRole);
         }
 
         if (robotRole == 1) {
@@ -229,8 +228,8 @@ public class RobotPlayer {
 
             if (curRuin != null) {
                 MapLocation targetLoc = curRuin.getMapLocation();
-                System.out.println(targetLoc);
                 Direction dir = rc.getLocation().directionTo(targetLoc);
+
                 if (rc.canMove(dir)) {
                     rc.move(dir);
                 } else {
@@ -240,7 +239,7 @@ public class RobotPlayer {
                         rc.move(randomDir);
                     }
                 }
-                
+
                 // Mark the pattern we need to draw to build a tower here if we haven't already.
                 MapLocation shouldBeMarked = curRuin.getMapLocation().subtract(dir);
                 if (rc.senseMapInfo(shouldBeMarked).getMark() == PaintType.EMPTY && rc.canMarkTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
