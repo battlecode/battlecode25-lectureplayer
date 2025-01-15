@@ -41,6 +41,8 @@ public class RobotPlayer {
     static HashSet<MapLocation> line = null;
     static int obstacleStartDist = 0;
 
+    static MapLocation targetEnemyRuin = null;
+
     /* Variables for communication */
     static ArrayList<MapLocation> knownTowers = new ArrayList<>();
     static boolean isMessenger = false;
@@ -147,19 +149,20 @@ public class RobotPlayer {
             MapLocation nextLoc = rc.getLocation().add(dir);
             // Pick a random robot type to build.
             int robotType = rng.nextInt(3);
-            if (robotType == 0 && rc.canBuildRobot(UnitType.SOLDIER, nextLoc)){
+            System.out.println(robotType);
+            if (robotType <= 2 && rc.canBuildRobot(UnitType.SOLDIER, nextLoc)){
                 rc.buildRobot(UnitType.SOLDIER, nextLoc);
-                System.out.println("BUILT A SOLDIER");
+                System.out.println("BUILT A SOLDIER"); // for now, always build soldiers
             }
-            else if (robotType == 1 && rc.canBuildRobot(UnitType.MOPPER, nextLoc)){
-                rc.buildRobot(UnitType.MOPPER, nextLoc);
-                System.out.println("BUILT A MOPPER");
-            }
-            else if (robotType == 2 && rc.canBuildRobot(UnitType.SPLASHER, nextLoc)){
-                // rc.buildRobot(UnitType.SPLASHER, nextLoc);
-                // System.out.println("BUILT A SPLASHER");
-                rc.setIndicatorString("SPLASHER NOT IMPLEMENTED YET");
-            }
+            // else if (robotType == 1 && rc.canBuildRobot(UnitType.MOPPER, nextLoc)){
+            //     rc.buildRobot(UnitType.MOPPER, nextLoc);
+            //     System.out.println("BUILT A MOPPER");
+            // }
+            // else if (robotType == 2 && rc.canBuildRobot(UnitType.SPLASHER, nextLoc)){
+            //     // rc.buildRobot(UnitType.SPLASHER, nextLoc);
+            //     // System.out.println("BUILT A SPLASHER");
+            //     rc.setIndicatorString("SPLASHER NOT IMPLEMENTED YET");
+            // }
         } else {
             // Otherwise, tick down the number of remaining save turns
 
@@ -178,6 +181,16 @@ public class RobotPlayer {
                 shouldSave = true;
             }
         }
+
+        // attack any nearby enemy robots
+        RobotInfo[] enemyRobots = rc.senseNearbyRobots(-1, rc.getTeam().opponent());
+
+        for (RobotInfo enemy : enemyRobots){
+            if (rc.canAttack(enemy.location)){
+                rc.attack(enemy.location);
+                break;
+            }
+        }
     }
 
 
@@ -186,55 +199,121 @@ public class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     public static void runSoldier(RobotController rc) throws GameActionException{
-        // Sense information about all visible nearby tiles.
-        MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
-        // Search for the closest nearby ruin to complete.
-        MapInfo curRuin = null;
-        int curDist = 9999999;
-        for (MapInfo tile : nearbyTiles){
-            // Make sure the ruin is not already complete (has no tower on it)
-            if (tile.hasRuin() && rc.senseRobotAtLocation(tile.getMapLocation()) == null) {
-                int checkDist = tile.getMapLocation().distanceSquaredTo(rc.getLocation());
-                if (checkDist < curDist) {
-                    curDist = checkDist;
-                    curRuin = tile;
+        // // Sense information about all visible nearby tiles.
+        // MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+        // // Search for the closest nearby ruin to complete.
+        // MapInfo curRuin = null;
+        // int curDist = 9999999;
+        // for (MapInfo tile : nearbyTiles){
+        //     // Make sure the ruin is not already complete (has no tower on it)
+        //     if (tile.hasRuin() && rc.senseRobotAtLocation(tile.getMapLocation()) == null) {
+        //         int checkDist = tile.getMapLocation().distanceSquaredTo(rc.getLocation());
+        //         if (checkDist < curDist) {
+        //             curDist = checkDist;
+        //             curRuin = tile;
+        //         }
+        //     }
+        // }
+
+        // if (curRuin != null && targetEnemyRuin == null) {
+        //     MapLocation targetLoc = curRuin.getMapLocation();
+        //     Direction dir = rc.getLocation().directionTo(targetLoc);
+        //     if (rc.canMove(dir))
+        //         rc.move(dir);
+        //     // Mark the pattern we need to draw to build a tower here if we haven't already.
+        //     MapLocation shouldBeMarked = curRuin.getMapLocation().subtract(dir);
+        //     if (rc.senseMapInfo(shouldBeMarked).getMark() == PaintType.EMPTY && rc.canMarkTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
+        //         rc.markTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
+        //         System.out.println("Trying to build a tower at " + targetLoc);
+        //     }
+        //     // Fill in any spots in the pattern with the appropriate paint.
+        //     for (MapInfo patternTile : rc.senseNearbyMapInfos(targetLoc, 8)){
+        //         if (patternTile.getMark() != patternTile.getPaint() && patternTile.getMark() != PaintType.EMPTY){
+        //             boolean useSecondaryColor = patternTile.getMark() == PaintType.ALLY_SECONDARY;
+        //             if (rc.canAttack(patternTile.getMapLocation()))
+        //                 rc.attack(patternTile.getMapLocation(), useSecondaryColor);
+        //         }
+        //     }
+        //     // Complete the ruin if we can.
+        //     if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
+        //         rc.completeTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
+        //         rc.setTimelineMarker("Tower built", 0, 255, 0);
+        //         System.out.println("Built a tower at " + targetLoc + "!");
+        //     }
+        // }
+
+        if (targetEnemyRuin == null) {
+            // Search for nearby ruins
+            MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
+            MapLocation tower = null;
+
+            for (MapInfo tile : nearbyTiles) {
+                MapLocation tileLoc = tile.getMapLocation();
+
+                if (tile.hasRuin()) {
+                    tower = tileLoc;
                 }
+            }
+
+            if (tower != null) {
+                // ASSUME SYMMETRY IS A REFLECTION THROUGH A HORIZONTAL LINE
+                targetEnemyRuin = new MapLocation(tower.x, rc.getMapHeight() - 1 - tower.y);
+                System.out.println("TARGET " + targetEnemyRuin);
             }
         }
 
-        if (curRuin != null){
-            MapLocation targetLoc = curRuin.getMapLocation();
-            Direction dir = rc.getLocation().directionTo(targetLoc);
-            if (rc.canMove(dir))
-                rc.move(dir);
-            // Mark the pattern we need to draw to build a tower here if we haven't already.
-            MapLocation shouldBeMarked = curRuin.getMapLocation().subtract(dir);
-            if (rc.senseMapInfo(shouldBeMarked).getMark() == PaintType.EMPTY && rc.canMarkTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
-                rc.markTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
-                System.out.println("Trying to build a tower at " + targetLoc);
-            }
-            // Fill in any spots in the pattern with the appropriate paint.
-            for (MapInfo patternTile : rc.senseNearbyMapInfos(targetLoc, 8)){
-                if (patternTile.getMark() != patternTile.getPaint() && patternTile.getMark() != PaintType.EMPTY){
-                    boolean useSecondaryColor = patternTile.getMark() == PaintType.ALLY_SECONDARY;
-                    if (rc.canAttack(patternTile.getMapLocation()))
-                        rc.attack(patternTile.getMapLocation(), useSecondaryColor);
+        if (targetEnemyRuin != null) {
+            int dsquared = rc.getLocation().distanceSquaredTo(targetEnemyRuin);
+
+            if (dsquared <= 8) {
+                // Attack the enemy
+                if (rc.canAttack(targetEnemyRuin)) {
+                    rc.attack(targetEnemyRuin);
                 }
+
+                // Move away from the enemy ruin
+                Direction dir = rc.getLocation().directionTo(targetEnemyRuin).opposite();
+
+                if (rc.canMove(dir)) {
+                    rc.move(dir);
+                } else if (rc.canMove(dir.rotateLeft())) {
+                    rc.move(dir.rotateLeft());
+                } else if (rc.canMove(dir.rotateRight())) {
+                    rc.move(dir.rotateRight());
+                }
+            } else {
+                for (Direction d : directions) {
+                    MapLocation nextLoc = rc.getLocation().add(d);
+                    
+                    if (nextLoc.distanceSquaredTo(targetEnemyRuin) <= 8) {
+                        if (rc.canMove(d)) {
+                            rc.move(d);
+                            break;
+                        }
+                    }
+                }
+
+                if (rc.canAttack(targetEnemyRuin)) {
+                    rc.attack(targetEnemyRuin);
+                }
+
+                // Else too far, so move towards the enemy ruin
+                bug2(rc, targetEnemyRuin);
             }
-            // Complete the ruin if we can.
-            if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
-                rc.completeTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
-                rc.setTimelineMarker("Tower built", 0, 255, 0);
-                System.out.println("Built a tower at " + targetLoc + "!");
-            }
+
+            rc.setIndicatorDot(targetEnemyRuin, 0, 255, 0);
+            rc.setIndicatorString("Moving to enemy ruin at " + targetEnemyRuin);
         }
 
-        // Move and attack randomly if no objective.
-        Direction dir = directions[rng.nextInt(directions.length)];
-        MapLocation nextLoc = rc.getLocation().add(dir);
-        if (rc.canMove(dir)){
-            rc.move(dir);
-        }
+        // // Move and attack randomly if no objective.
+        // Direction dir = directions[rng.nextInt(directions.length)];
+        // MapLocation nextLoc = rc.getLocation().add(dir);
+        // if (rc.canMove(dir)){
+        //     rc.move(dir);
+        // }
+
+        
+
         // Try to paint beneath us as we walk to avoid paint penalties.
         // Avoiding wasting paint by re-painting our own tiles.
         MapInfo currentTile = rc.senseMapInfo(rc.getLocation());
