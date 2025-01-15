@@ -23,6 +23,13 @@ public class RobotPlayer {
         SAVE_CHIPS
     }
 
+    private enum RobotState {
+        STARTING,
+        PAINTING_PATTERN,
+        EXPLORING,
+        ATTACKING
+    }
+
     /**
      * We will use this variable to count the number of turns this robot has been alive.
      * You can use static variables like this to save any information you want. Keep in mind that even though
@@ -41,7 +48,7 @@ public class RobotPlayer {
     static HashSet<MapLocation> line = null;
     static int obstacleStartDist = 0;
 
-    static int robotRole = 0;
+    static RobotState state = RobotState.STARTING;
     static MapLocation targetEnemyRuin = null;
 
     /* Variables for communication */
@@ -49,6 +56,14 @@ public class RobotPlayer {
     static boolean isMessenger = false;
     static boolean shouldSave = false;
     static int saveTurns = 0;
+
+    static boolean[][] paintTowerPattern = null;
+    static boolean[][] moneyTowerPattern = null;
+
+    static MapLocation paintingRuinLoc = null;
+    static UnitType paintingTowerType = null;
+    static int paintingTurns = 0;
+    static int turnsWithoutAttack = 0;
 
     /**
      * A random number generator.
@@ -90,6 +105,9 @@ public class RobotPlayer {
         if (rc.getType() == UnitType.MOPPER && rc.getID() % 2 == 0) {
             isMessenger = true;
         }
+
+        paintTowerPattern = rc.getTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER);
+        moneyTowerPattern = rc.getTowerPattern(UnitType.LEVEL_ONE_MONEY_TOWER);
 
         while (true) {
             // This code runs during the entire lifespan of the robot, which is why it is in an infinite
@@ -133,6 +151,24 @@ public class RobotPlayer {
         }
 
         // Your code should never reach here (unless it's intentional)! Self-destruction imminent...
+    }
+
+    public static UnitType getNewTowerType(RobotController rc) {
+        int towerCount = rc.getNumberTowers();
+        if(towerCount < 4) 
+            return UnitType.LEVEL_ONE_MONEY_TOWER;
+        return towerCount % 2 == 1 ? UnitType.LEVEL_ONE_PAINT_TOWER : UnitType.LEVEL_ONE_MONEY_TOWER;
+    }
+
+    public static boolean getIsSecondary(MapLocation ruinLoc, MapLocation paintLoc, UnitType towerType) {
+        if(!isWithinPattern(ruinLoc, paintLoc)) return false;
+        int col = paintLoc.x - ruinLoc.x + 2;
+        int row = paintLoc.y - ruinLoc.y + 2;
+        return towerType == UnitType.LEVEL_ONE_PAINT_TOWER ? paintTowerPattern[row][col] : moneyTowerPattern[row][col];
+    }
+
+    public static boolean isWithinPattern(MapLocation ruinLoc, MapLocation paintLoc) {
+        return Math.abs(paintLoc.x - ruinLoc.x) <= 2 && Math.abs(paintLoc.y - ruinLoc.y) <= 2 && !ruinLoc.equals(paintLoc);
     }
 
     /**
@@ -182,6 +218,7 @@ public class RobotPlayer {
 
             // If we are not currently saving and we receive the save chips message, start saving
             if (!shouldSave && m.getBytes() == MessageType.SAVE_CHIPS.ordinal()) {
+                rc.broadcastMessage(MessageType.SAVE_CHIPS.ordinal());
                 saveTurns = 75;
                 shouldSave = true;
             }
@@ -204,18 +241,26 @@ public class RobotPlayer {
      * This code is wrapped inside the infinite loop in run(), so it is called once per turn.
      */
     public static void runSoldier(RobotController rc) throws GameActionException{
-        if (robotRole == 0) {
-            robotRole = rc.getID() % 2 + 1;
+        if (state == RobotState.STARTING) {
+            if(rc.getID() % 2 == 1) {
+                state = RobotState.ATTACKING;
+            }
+            else {
+                state = RobotState.EXPLORING;
+            }
         }
 
-        if (robotRole == 1) {
+        if(state == RobotState.PAINTING_PATTERN) {
+            runPaintPattern(rc);
+            paintingTurns++;
+        }
+        else if(state == RobotState.EXPLORING) {
             // Sense information about all visible nearby tiles.
             MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
             // Search for the closest nearby ruin to complete.
             MapInfo curRuin = null;
             int curDist = 9999999;
-
-            for (MapInfo tile : nearbyTiles) {
+            for (MapInfo tile : nearbyTiles){
                 // Make sure the ruin is not already complete (has no tower on it)
                 if (tile.hasRuin() && rc.senseRobotAtLocation(tile.getMapLocation()) == null) {
                     int checkDist = tile.getMapLocation().distanceSquaredTo(rc.getLocation());
@@ -225,43 +270,34 @@ public class RobotPlayer {
                     }
                 }
             }
-
-            if (curRuin != null) {
-                MapLocation targetLoc = curRuin.getMapLocation();
-                Direction dir = rc.getLocation().directionTo(targetLoc);
-
-                if (rc.canMove(dir)) {
-                    rc.move(dir);
-                } else {
-                    Direction randomDir = directions[rng.nextInt(directions.length)];
-
-                    if (rc.canMove(randomDir)) {
-                        rc.move(randomDir);
-                    }
-                }
-
-                // Mark the pattern we need to draw to build a tower here if we haven't already.
-                MapLocation shouldBeMarked = curRuin.getMapLocation().subtract(dir);
-                if (rc.senseMapInfo(shouldBeMarked).getMark() == PaintType.EMPTY && rc.canMarkTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
-                    rc.markTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
-                    System.out.println("Trying to build a tower at " + targetLoc);
-                }
-                // Fill in any spots in the pattern with the appropriate paint.
-                for (MapInfo patternTile : rc.senseNearbyMapInfos(targetLoc, 8)){
-                    if (patternTile.getMark() != patternTile.getPaint() && patternTile.getMark() != PaintType.EMPTY){
-                        boolean useSecondaryColor = patternTile.getMark() == PaintType.ALLY_SECONDARY;
-                        if (rc.canAttack(patternTile.getMapLocation()))
-                            rc.attack(patternTile.getMapLocation(), useSecondaryColor);
-                    }
-                }
-                // Complete the ruin if we can.
-                if (rc.canCompleteTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc)){
-                    rc.completeTowerPattern(UnitType.LEVEL_ONE_PAINT_TOWER, targetLoc);
-                    rc.setTimelineMarker("Tower built", 0, 255, 0);
-                    System.out.println("Built a tower at " + targetLoc + "!");
+            if(curRuin != null) {
+                if(curDist > 4) bug0(rc, curRuin.getMapLocation());
+                else {
+                    state = RobotState.PAINTING_PATTERN;
+                    paintingTowerType = getNewTowerType(rc);
+                    turnsWithoutAttack = 0;
+                    paintingTurns = 0;
+                    paintingRuinLoc = curRuin.getMapLocation();
                 }
             }
-        } else if (robotRole == 2) {
+
+            // Move and attack randomly if no objective.
+            Direction dir = directions[rng.nextInt(directions.length)];
+            MapLocation nextLoc = rc.getLocation().add(dir);
+            if (rc.canMove(dir)){
+                rc.move(dir);
+            }
+            // Try to paint beneath us as we walk to avoid paint penalties.
+            // Avoiding wasting paint by re-painting our own tiles.
+            MapInfo currentTile = rc.senseMapInfo(rc.getLocation());
+            if (!currentTile.getPaint().isAlly() && rc.canAttack(rc.getLocation())){
+                rc.attack(rc.getLocation());
+            }
+
+            updateFriendlyTowers(rc);
+            checkNearbyRuins(rc);
+        }
+        else if (state == RobotState.ATTACKING) {
             if (targetEnemyRuin == null) {
                 // Search for nearby ruins
                 MapInfo[] nearbyTiles = rc.senseNearbyMapInfos();
@@ -340,6 +376,52 @@ public class RobotPlayer {
         MapInfo currentTile = rc.senseMapInfo(rc.getLocation());
         if (!currentTile.getPaint().isAlly() && rc.canAttack(rc.getLocation())){
             rc.attack(rc.getLocation());
+        }
+    }
+
+    public static void runPaintPattern(RobotController rc) throws GameActionException {
+           
+        if(paintingTurns % 3 == 0) {
+            Direction toRuin = rc.getLocation().directionTo(paintingRuinLoc);
+            Direction tangent = toRuin.rotateRight().rotateRight();
+            int distance = rc.getLocation().distanceSquaredTo(paintingRuinLoc);
+
+            if(distance > 4) {
+                //don't make the circle too big
+                tangent = tangent.rotateLeft();
+            }
+
+            if(rc.canMove(tangent)) rc.move(tangent);
+            else if(rc.canMove(tangent.rotateRight())) rc.move(tangent.rotateRight());
+            else if(rc.canMove(tangent.rotateLeft())) rc.move(tangent.rotateLeft());
+        }
+
+        //paint tiles for the pattern
+        if(rc.isActionReady()) {
+            MapInfo[] infos = rc.senseNearbyMapInfos(3);
+            boolean attacked = false;
+            for(MapInfo info : infos) {
+                MapLocation paintLoc = info.getMapLocation();
+                boolean shouldBeSecondary = getIsSecondary(paintingRuinLoc, paintLoc, paintingTowerType);
+                if(rc.canAttack(paintLoc)
+                        && (info.getPaint() == PaintType.EMPTY || info.getPaint().isSecondary() != shouldBeSecondary) 
+                        && isWithinPattern(paintingRuinLoc, paintLoc)) {
+                    rc.attack(paintLoc, shouldBeSecondary);
+                    attacked = true;
+                    turnsWithoutAttack = 0;
+                    break;
+                }
+            }
+            if(!attacked) turnsWithoutAttack++;
+        }
+
+        if (rc.canCompleteTowerPattern(paintingTowerType, paintingRuinLoc)){
+            rc.completeTowerPattern(paintingTowerType, paintingRuinLoc);
+            state = RobotState.EXPLORING;
+        }
+        if(turnsWithoutAttack > 3) {
+            //give up painting, pattern is done
+            state = RobotState.EXPLORING;
         }
     }
 
@@ -470,7 +552,6 @@ public class RobotPlayer {
 
         MapLocation nextLoc = rc.getLocation().add(dir);
         rc.setIndicatorDot(nextLoc, 255, 0, 0);
-        Clock.yield();
 
         // try to move in the target direction
         if(rc.canMove(dir)){
@@ -493,7 +574,7 @@ public class RobotPlayer {
             Direction dir = rc.getLocation().directionTo(target);
             MapLocation nextLoc = rc.getLocation().add(dir);
             rc.setIndicatorDot(nextLoc, 255, 0, 0);
-            Clock.yield();
+
             // try to move in the target direction
             if(rc.canMove(dir)){
                 rc.move(dir);
@@ -547,7 +628,6 @@ public class RobotPlayer {
 
                 MapLocation nextLoc = rc.getLocation().add(tracingDir);
                 rc.setIndicatorDot(nextLoc, 255, 0, 0);
-                Clock.yield();
             }
         }
     }
@@ -566,7 +646,6 @@ public class RobotPlayer {
         if(!isTracing) {
             Direction dir = rc.getLocation().directionTo(target);
             rc.setIndicatorDot(rc.getLocation().add(dir), 255, 0, 0);
-            Clock.yield();
 
             if(rc.canMove(dir)){
                 rc.move(dir);
