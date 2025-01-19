@@ -30,10 +30,15 @@ is_messenger = False
 should_save = False
 save_turns = 0
 
+# Bug1 Variables
+is_tracing = False # also used in bug 2
+smallest_distance = 10000000
+closest_location = None
+tracing_dir = None
+
 # Bug2 Variables
 prev_dest = MapLocation(100000, 100000)
 line = set()
-is_tracing = False
 obstacle_start_dist = 0
 tracing_dir = None
 
@@ -257,8 +262,74 @@ def update_enemy_robots():
             if can_send_message(ally.location):
                 send_message(ally.location, len(enemy_robots))
 
+#Bug 0
+def bug0(target):
+    # get direction from current location to target
+    dir = get_location().direction_to(target)
+    nextLoc = get_location().add(dir)
 
-#Bug2
+    # try to move in target direction
+    if(can_move(dir)):
+        move(dir)
+
+    # keep turning left until we can move
+    for i in range(8):
+        dir = dir.rotate_left()
+        if can_move(dir):
+            move(dir)
+            break
+
+#Bug 1
+def bug1(target):
+    global is_tracing, smallest_distance, map_location, closest_location, tracing_dir
+
+    if not is_tracing:
+        # proceed as normal
+        dir = get_location().direction_to(target)
+        next_loc = get_location().add(dir)
+
+        # try to move in target direction
+        if can_move(dir):
+            move(dir)
+        else:
+            is_tracing = True
+            tracing_dir = dir
+    else:
+        # in tracing mode
+
+        # need a stopping condition - this will be when we see the closest location again
+        if closest_location is not None and get_location() == closest_location: 
+            # reset global tracing variables
+            is_tracing = False
+            smallest_distance = 10000000
+            closest_location = None
+            tracing_dir = None
+        else:
+            # continue tracing
+
+            # update closest_location and smallest_distance
+            dist_to_target = get_location().distance_squared_to(target)
+            if dist_to_target < smallest_distance:
+                smallest_distance = dist_to_target
+                closest_location = get_location()
+            
+            # go along perimeter of obstacle
+            if can_move(tracing_dir):
+                # move forward & try to turn right
+                move(tracing_dir)
+                tracing_dir = tracing_dir.rotate_right()
+                tracing_dir = tracing_dir.rotate_right()
+            else:
+                # turn left because we can't move forward; keep turning left until we can move again
+                for i in range(8):
+                    tracing_dir = tracing_dir.rotate_left()
+                    if can_move(tracing_dir):
+                        move(tracing_dir)
+                        tracing_dir = tracing_dir.rotate_right()
+                        tracing_dir = tracing_dir.rotate_right()
+                        break
+            
+#Bug 2
 
 def bug2(target):
     global prev_dest, line, is_tracing, obstacle_start_dist, tracing_dir
